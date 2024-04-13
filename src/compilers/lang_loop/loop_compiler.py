@@ -6,7 +6,7 @@ from common.compilerSupport import *
 def compileModule(m: mod, cfg: CompilerConfig) -> WasmModule:
     vars = loop_tychecker.tycheckModule(m)
     wasm_instrs = compileStmts(m.stmts)
-    #print(wasm_instrs)
+
     locals: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(x), 'i64' if type(y)==Int else 'i32') for x, y in vars.types()]
 
     module = WasmModule(wasmImports(cfg.maxMemSize),
@@ -44,6 +44,16 @@ def compileIfStmt(stmt: IfStmt) -> list[WasmInstr]:
 def compileWhileStmt(stmt: WhileStmt) -> list[WasmInstr]:
     wasm_instrs: list[WasmInstr] = []
 
+    loop_label_start = WasmId('$loop_start')
+    loop_label_exit = WasmId('$loop_exit')
+    
+    wasm_instrs.append(WasmInstrBlock(loop_label_exit, None, [
+        WasmInstrLoop(loop_label_start, compileExp(stmt.cond) + 
+            [WasmInstrIf('i32',
+                        compileStmts(stmt.body) + [WasmInstrBranch(loop_label_start, conditional=False)],
+                        [WasmInstrBranch(loop_label_exit, conditional=False)])
+                        ] + [WasmInstrDrop()])
+    ]))
     return wasm_instrs
 
 def compileAssignStmt(stmt: Assign) -> list[WasmInstr]:
