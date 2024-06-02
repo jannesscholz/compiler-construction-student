@@ -12,17 +12,15 @@ def compileModule(m: PlainAst.mod, cfg: CompilerConfig) -> WasmModule:
     la_array, ctx = array_transform.transStmts(m.stmts, array_transform.Ctx())
 
     wasm_instrs = compileStmts(la_array, cfg)
-    locals_2: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(k), 'i64' if type(v)==Int else 'i32') for k, v in ctx.freshVars.items()]
-    locals: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(x), 'i64' if type(y)==Int else 'i32') for x, y in vars.types()]
-    true_data = WasmData(start=1, content="True")
-    false_data = WasmData(start=0, content="False")
+    locals_temp: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(k), 'i64' if type(v)==Int else 'i32') for k, v in ctx.freshVars.items()]
+    locals_var: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(x), 'i64' if type(y)==Int else 'i32') for x, y in vars.types()]
 
     module = WasmModule(wasmImports(cfg.maxMemSize),
                         [WasmExport('main', WasmExportFunc(WasmId('$main')))],
                         Globals.decls(),
-                        [true_data, false_data] + Errors.data(),
+                        [WasmData(start=1, content="True"), WasmData(start=0, content="False")] + Errors.data(),
                         WasmFuncTable([]),
-                        [WasmFunc(WasmId('$main'), [], None, locals_2 + locals + Locals.decls(), wasm_instrs)])
+                        [WasmFunc(WasmId('$main'), [], None, locals_temp + locals_var + Locals.decls(), wasm_instrs)])
     
     return module
 
@@ -107,7 +105,6 @@ def compileExp(e: exp | AtomExp, cfg: CompilerConfig) -> list[WasmInstr]:
     match e:
         case ArrayInitDyn():
             element_size = 8 if isinstance(tyOfExp(e), Int) else 4
-
             wasm_instrs.extend(compileInitArray(e.len, tyOfExp(e), cfg))
             wasm_instrs.append(WasmInstrVarLocal('tee', WasmId('$@tmp_i32')))
             wasm_instrs.append(WasmInstrVarLocal('get', WasmId('$@tmp_i32')))
@@ -139,11 +136,9 @@ def compileExp(e: exp | AtomExp, cfg: CompilerConfig) -> list[WasmInstr]:
             ]))
 
         case ArrayInitStatic():
-            wasm_instrs.extend(compileInitArray(IntConst(len(e.elemInit)), tyOfExp(e), cfg))
-
-            wasm_instrs.append(WasmInstrVarLocal('tee', WasmId('$@tmp_i32')))
-
             element_size = 8 if isinstance(tyOfExp(e), Int) else 4
+            wasm_instrs.extend(compileInitArray(IntConst(len(e.elemInit)), tyOfExp(e), cfg))
+            wasm_instrs.append(WasmInstrVarLocal('tee', WasmId('$@tmp_i32')))
 
             for index, elem in enumerate(e.elemInit):
 
@@ -199,75 +194,62 @@ def compileExp(e: exp | AtomExp, cfg: CompilerConfig) -> list[WasmInstr]:
             elif "len" in id.name:
                 wasm_instrs.extend(arrayLenInstrs())
         case UnOp(op, sub):
+            wasm_instrs.extend(compileExp(sub, cfg))
             match op:
                 case USub():
-                    wasm_instrs.extend(compileExp(sub, cfg))
                     wasm_instrs.append(WasmInstrConst('i64', -1))
                     wasm_instrs.append(WasmInstrNumBinOp('i64', 'mul'))
                 case Not():
-                    wasm_instrs.extend(compileExp(sub, cfg))
                     wasm_instrs.append(WasmInstrConst('i32', 1))
                     wasm_instrs.append(WasmInstrNumBinOp('i32', 'sub'))
         case BinOp(left, op, right):
-            match op:
-                case Is():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrIntRelOp('i32', 'eq'))
-                case Add():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrNumBinOp('i64', 'add'))
-                case Sub():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrNumBinOp('i64', 'sub'))
-                case Mul():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrNumBinOp('i64', 'mul'))
-                case LessEq():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrIntRelOp('i64', 'le_s'))
-                case Less():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrIntRelOp('i64', 'lt_s'))
-                case Greater():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrIntRelOp('i64', 'gt_s'))
-                case GreaterEq():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    wasm_instrs.append(WasmInstrIntRelOp('i64', 'ge_s'))
-                case Eq():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    match tyOfExp(left):
-                        case Array():
-                            pass
-                        case Bool():
-                            wasm_instrs.append(WasmInstrIntRelOp('i32', 'eq'))
-                        case Int():
-                            wasm_instrs.append(WasmInstrIntRelOp('i64', 'eq'))
-                case NotEq():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.extend(compileExp(right, cfg))
-                    match tyOfExp(left):
-                        case Array():
-                            pass
-                        case Bool():
-                            wasm_instrs.append(WasmInstrIntRelOp('i32', 'ne'))
-                        case Int():
-                            wasm_instrs.append(WasmInstrIntRelOp('i64', 'ne'))
-                case And():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.append(WasmInstrIf('i32', compileExp(right, cfg), [WasmInstrConst('i32', 0)]))
-                case Or():
-                    wasm_instrs.extend(compileExp(left, cfg))
-                    wasm_instrs.append(WasmInstrIf('i32', [WasmInstrConst('i32', 1)], compileExp(right, cfg)))
+            if op != And() and op != Or():
+                wasm_instrs.extend(compileExp(left, cfg))
+                wasm_instrs.extend(compileExp(right, cfg))
+                match op:
+                    case Is():
+                        wasm_instrs.append(WasmInstrIntRelOp('i32', 'eq'))
+                    case Add():
+                        wasm_instrs.append(WasmInstrNumBinOp('i64', 'add'))
+                    case Sub():
+                        wasm_instrs.append(WasmInstrNumBinOp('i64', 'sub'))
+                    case Mul():
+                        wasm_instrs.append(WasmInstrNumBinOp('i64', 'mul'))
+                    case LessEq():
+                        wasm_instrs.append(WasmInstrIntRelOp('i64', 'le_s'))
+                    case Less():
+                        wasm_instrs.append(WasmInstrIntRelOp('i64', 'lt_s'))
+                    case Greater():
+                        wasm_instrs.append(WasmInstrIntRelOp('i64', 'gt_s'))
+                    case GreaterEq():
+                        wasm_instrs.append(WasmInstrIntRelOp('i64', 'ge_s'))
+                    case Eq():
+                        match tyOfExp(left):
+                            case Array():
+                                pass
+                            case Bool():
+                                wasm_instrs.append(WasmInstrIntRelOp('i32', 'eq'))
+                            case Int():
+                                wasm_instrs.append(WasmInstrIntRelOp('i64', 'eq'))
+                    case NotEq():
+                        match tyOfExp(left):
+                            case Array():
+                                pass
+                            case Bool():
+                                wasm_instrs.append(WasmInstrIntRelOp('i32', 'ne'))
+                            case Int():
+                                wasm_instrs.append(WasmInstrIntRelOp('i64', 'ne'))
+                    case _:
+                        pass
+            else:
+                wasm_instrs.extend(compileExp(left, cfg))
+                match op:
+                    case And():
+                        wasm_instrs.append(WasmInstrIf('i32', compileExp(right, cfg), [WasmInstrConst('i32', 0)]))
+                    case Or():
+                        wasm_instrs.append(WasmInstrIf('i32', [WasmInstrConst('i32', 1)], compileExp(right, cfg)))
+                    case _:
+                        pass
 
     return wasm_instrs
 
@@ -344,13 +326,12 @@ def arrayOffsetInstrs(arrayExp: atomExp, indexExp: atomExp, cfg: CompilerConfig)
     wasm_instrs.extend(compileExp(AtomExp(indexExp), cfg))
     wasm_instrs.append(WasmInstrConvOp('i32.wrap_i64'))
 
-    if isinstance(arrayExp.ty.elemTy, Int): # type:ignore
+    if isinstance(arrayExp.ty.elemTy, Int): # type: ignore
         wasm_instrs.append(WasmInstrConst('i32', 8))
     else:
         wasm_instrs.append(WasmInstrConst('i32', 4))
 
     wasm_instrs += [
-        # Calculate offset: array address + index * element size + header size
         WasmInstrNumBinOp('i32', 'mul'),
         WasmInstrConst('i32', 4),
         WasmInstrNumBinOp('i32', 'add'),
