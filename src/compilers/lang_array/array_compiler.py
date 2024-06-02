@@ -10,7 +10,7 @@ from common.compilerSupport import *
 def compileModule(m: PlainAst.mod, cfg: CompilerConfig) -> WasmModule:
     vars = array_tychecker.tycheckModule(m)
     la_array, ctx = array_transform.transStmts(m.stmts, array_transform.Ctx())
-    
+
     wasm_instrs = compileStmts(la_array, cfg)
     locals_2: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(k), 'i64' if type(v)==Int else 'i32') for k, v in ctx.freshVars.items()]
     locals: list[tuple[WasmId, WasmValtype]] = [(identToWasmId(x), 'i64' if type(y)==Int else 'i32') for x, y in vars.types()]
@@ -278,17 +278,23 @@ def compileInitArray(lenExp: atomExp, elemTy: ty, cfg: CompilerConfig)-> list[Wa
     wasm_instrs: list[WasmInstr] = []
 
     wasm_instrs.extend(computeLength(lenExp, cfg))
-    wasm_instrs.append(WasmInstrConst('i64', 6553600))
+    if isinstance(elemTy, Int):
+        wasm_instrs.append(WasmInstrConst('i64', 8))
+    else:
+        wasm_instrs.append(WasmInstrConst('i64', 4))
+    wasm_instrs.append(WasmInstrNumBinOp('i64', 'mul'))
+    
+    wasm_instrs.append(WasmInstrConst('i64', cfg.maxArraySize))
     wasm_instrs.append(WasmInstrIntRelOp('i64', 'gt_s'))
     wasm_instrs.append(WasmInstrIf('i32',
-                                   Errors.outputError(Errors.arraySize) + [WasmInstrConst('i32', 0)],
+                                   Errors.outputError(Errors.arraySize) + [WasmInstrTrap()],
                                    [WasmInstrConst('i32', 0)]))
     wasm_instrs.append(WasmInstrDrop())
     wasm_instrs.extend(computeLength(lenExp, cfg))
     wasm_instrs.append(WasmInstrConst('i64', 0))
     wasm_instrs.append(WasmInstrIntRelOp('i64', 'lt_s'))
     wasm_instrs.append(WasmInstrIf('i32',
-                                   Errors.outputError(Errors.arraySize) + [WasmInstrConst('i32', 0)],
+                                   Errors.outputError(Errors.arraySize) + [WasmInstrTrap()],
                                    [WasmInstrConst('i32', 0)]))
     wasm_instrs.append(WasmInstrDrop())
     wasm_instrs.append(WasmInstrVarGlobal('get', Globals.freePtr))
@@ -331,7 +337,7 @@ def arrayOffsetInstrs(arrayExp: atomExp, indexExp: atomExp, cfg: CompilerConfig)
     wasm_instrs.append(WasmInstrConvOp('i32.wrap_i64'))
     wasm_instrs.append(WasmInstrIntRelOp('i32', 'le_u'))
     wasm_instrs.append(WasmInstrIf('i32', 
-                                   Errors.outputError(Errors.arrayIndexOutOfBounds) + [WasmInstrConst('i32', 0)],
+                                   Errors.outputError(Errors.arrayIndexOutOfBounds) + [WasmInstrTrap()],
                                    [WasmInstrConst('i32', 0)]))
     wasm_instrs.append(WasmInstrDrop())
     wasm_instrs.extend(compileExp(AtomExp(arrayExp), cfg))
