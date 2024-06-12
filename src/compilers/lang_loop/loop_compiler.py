@@ -37,13 +37,14 @@ def compileIfStmt(stmt: IfStmt) -> list[WasmInstr]:
     wasm_instrs: list[WasmInstr] = []
     
     wasm_instrs.extend(compileExp(stmt.cond))
-    wasm_instrs.extend([WasmInstrIf('i32', compileStmts(stmt.thenBody) + [WasmInstrConst('i32', 0)], compileStmts(stmt.elseBody) + [WasmInstrConst('i32', 0)])] + [WasmInstrDrop()])
-
+    #wasm_instrs.extend([WasmInstrIf('i32', compileStmts(stmt.thenBody) + [WasmInstrConst('i32', 0)], compileStmts(stmt.elseBody) + [WasmInstrConst('i32', 0)])] + [WasmInstrDrop()])
+    wasm_instrs.append(WasmInstrIf(None, compileStmts(stmt.thenBody), compileStmts(stmt.elseBody)))
+    
     return wasm_instrs
 
 def compileWhileStmt(stmt: WhileStmt) -> list[WasmInstr]:
     wasm_instrs: list[WasmInstr] = []
-
+    """
     loop_label_start = WasmId('$loop_start')
     loop_label_exit = WasmId('$loop_exit')
     
@@ -54,7 +55,20 @@ def compileWhileStmt(stmt: WhileStmt) -> list[WasmInstr]:
                         [WasmInstrBranch(loop_label_exit, conditional=False)])
                         ] + [WasmInstrDrop()])
     ]))
+    """
+    loop_body = compileLoopBody(stmt.cond, stmt.body)
+    loop: list[WasmInstr] = [WasmInstrLoop(WasmId("$loop_start"), loop_body)]
+    wasm_instrs.append(WasmInstrBlock(WasmId("$loop_exit"), None, loop))
+
     return wasm_instrs
+
+def compileLoopBody(cond: exp, body: list[stmt]) -> list[WasmInstr]:
+    body_instr: list[WasmInstr] = []
+    body_instr.extend(compileExp(cond))
+    body_instr.append(WasmInstrIf(None, [], [WasmInstrBranch(WasmId("$loop_exit"), False)]))
+    body_instr.extend(compileStmts(body))
+    body_instr.append(WasmInstrBranch(WasmId("$loop_start"), False))
+    return body_instr
 
 def compileAssignStmt(stmt: Assign) -> list[WasmInstr]:
 
