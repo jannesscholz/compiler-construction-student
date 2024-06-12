@@ -10,13 +10,13 @@ def instrDef(instr: tac.instr) -> set[tac.ident]:
         case tac.Assign():
             return set([instr.var])
         case tac.Call():
-            if instr.name.name == "input_int":
+            if instr.name.name == "$input_i64":
                 r: Optional[tac.ident] = instr.var
                 if r is not None:
                     return set([r])
+            return set()
         case _:
             return set()
-    return set()
 
 def instrUse(instr: tac.instr) -> set[tac.ident]:
     """
