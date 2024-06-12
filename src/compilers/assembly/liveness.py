@@ -7,11 +7,11 @@ def instrDef(instr: tac.instr) -> set[tac.ident]:
     Returns the set of identifiers defined by some instrucution.
     """
     match instr:
-        case tac.Assign():
-            return set([instr.var])
-        case tac.Call():
-            if instr.name.name == "$input_i64":
-                r: Optional[tac.ident] = instr.var
+        case tac.Assign(v, _):
+            return set([v])
+        case tac.Call(v, n, _):
+            if n.name == "$input_i64":
+                r: Optional[tac.ident] = v
                 if r is not None:
                     return set([r])
             return set()
@@ -24,36 +24,36 @@ def instrUse(instr: tac.instr) -> set[tac.ident]:
     """
     r: set[tac.ident] = set()
     match instr:
-        case tac.Assign():
-            match instr.left:
-                case tac.Prim():
-                    match instr.left.p:
+        case tac.Assign(_, l):
+            match l:
+                case tac.Prim(p):
+                    match p:
                         case tac.Name():
-                            r.add(instr.left.p.var)
+                            r.add(p.var)
                         case _:
                             pass
-                case tac.BinOp():
-                    match instr.left.left:
+                case tac.BinOp(left, _, right):
+                    match left:
                         case tac.Name():
-                            r.add(instr.left.left.var)
+                            r.add(left.var)
                         case _:
                             pass
-                    match instr.left.right:
+                    match right:
                         case tac.Name():
-                            r.add(instr.left.right.var)
+                            r.add(right.var)
                         case _:
                             pass
-        case tac.Call():
-            for arg in instr.args:
+        case tac.Call(_, _, args):
+            for arg in args:
                 match arg:
-                    case tac.Name():
-                        r.add(arg.var)
+                    case tac.Name(v):
+                        r.add(v)
                     case _:
                         pass
-        case tac.GotoIf():
-            match instr.test:
-                case tac.Name():
-                    r.add(instr.test.var)
+        case tac.GotoIf(t, l):
+            match t:
+                case tac.Name(v):
+                    r.add(v)
                 case _:
                     pass
         case _:
