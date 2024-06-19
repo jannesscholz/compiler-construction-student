@@ -76,27 +76,44 @@ def transExp(e: exp, needAtomic: bool, ctx: Ctx) -> tuple[atom.exp, Temporaries]
             return (atom.AtomExp(atom.IntConst(v, Int()), t), [])
         case BoolConst(v):
             return (atom.AtomExp(atom.BoolConst(v, Bool()), t), [])
-        case Call(id, args):
-            (atomArgs, tmps) = utils.unzip([transExp(a, False, ctx) for a in args])
-            match id:
-                case Name(var, BuiltinFun()):
-                    return atomic(needAtomic, atom.Call(atom.CallTargetBuiltin(var), atomArgs, t), utils.flatten(tmps), ctx)
-                case Name(var, UserFun()):
-                    return atomic(needAtomic, atom.Call(atom.CallTargetDirect(var), atomArgs, t), utils.flatten(tmps), ctx)
-                case Name(var, Var()):
-                    types: list[ty] = []
-                    for arg in atomArgs:
-                        match arg.ty:
-                            case NotVoid(type_of_arg):
-                                types.append(type_of_arg)
-                            case _:
-                                pass
-                    return atomic(needAtomic, atom.Call(atom.CallTargetIndirect(var, types, t), atomArgs, t), utils.flatten(tmps), ctx)
-                case Call(var, args):
+        case Call(fun, args):
+            match fun:
+                case Name():
                     (atomArgs, tmps) = utils.unzip([transExp(a, False, ctx) for a in args])
-                    return transExp(var, True, ctx)
+                    match fun.scope:
+                        case BuiltinFun():
+                            fun_to_call = atom.CallTargetBuiltin(fun.var)
+                        case Var():
+                            atomic_fun, tmps_fun = transExp(fun, True, ctx)
+                            if isinstance(atomic_fun, atom.AtomExp) and isinstance(atomic_fun.e, atom.VarName):
+                                var_name = atomic_fun.e.var
+                                arg_types = [arg.ty.ty for arg in args if isinstance(arg.ty, NotVoid)]
+                                fun_to_call = atom.CallTargetIndirect(var_name, arg_types, t)
+                            else:
+                                raise ValueError("Call, Name, Var is wrong")
+                        case UserFun():
+                            fun_to_call = atom.CallTargetDirect(fun.var)
+                        case _:
+                            raise TypeError(f"scope {fun.scope} not defined")
+                    return atomic(needAtomic, atom.Call(fun_to_call, atomArgs, t), utils.flatten(tmps), ctx)
+                case Subscript() | Call():
+                    atom_fun, tmps_fun = transExp(fun, True, ctx)
+                    atom_args: list[atom.exp]  = []
+                    args_tys: list[ty] = []
+                    tmps_args: Temporaries = []
+                    for arg in args:
+                        atomic_arg, tmps_arg = transExp(arg, True, ctx)
+                        atom_args.append(atomic_arg)
+                        tmps_args.extend(tmps_arg)
+                        if arg.ty is not None and isinstance(arg.ty, NotVoid):
+                            args_tys.append(arg.ty.ty)
+                    if isinstance(atom_fun.ty, atom.NotVoid) and isinstance(atom_fun.ty.ty, atom.Fun):
+                        indirect = atom.CallTargetIndirect(tmps_fun[0][0], args_tys, atom_fun.ty.ty.result)
+                        return atom.Call(indirect, atom_args, t), tmps_fun + tmps_args
+                    else:
+                        raise ValueError("Call, Subs/Call is wrong")
                 case _:
-                    raise ValueError(f'type still None after type-checking. Expression: {e}')
+                    raise TypeError(f"call not implemented for {fun}")
         case UnOp(op, sub):
             (atomSub, tmps) = transExp(sub, False, ctx)
             return atomic(needAtomic, atom.UnOp(op, atomSub, t), tmps, ctx)
@@ -104,9 +121,20 @@ def transExp(e: exp, needAtomic: bool, ctx: Ctx) -> tuple[atom.exp, Temporaries]
             (l, tmps1) = transExp(left, False, ctx)
             (r, tmps2) = transExp(right, False, ctx)
             return atomic(needAtomic, atom.BinOp(l, op, r, t), tmps1 + tmps2, ctx)
-        case Name(x):
+        case Name(var, scope):
             xt = assertExpNotVoid(e)
-            return (atom.AtomExp(atom.VarName(x, xt), t), [])
+            match scope:
+                # local variable or function parameter
+                case Var():
+                    return (atom.AtomExp(atom.VarName(var, xt), t), [])
+                # top-level function
+                case UserFun():
+                    return (atom.AtomExp(atom.FunName(var, xt), t), [])
+                # builtin function (len, print, input_int)
+                case BuiltinFun():
+                    return (atom.AtomExp(atom.VarName(var, xt), t), [])
+                case _:
+                    raise ValueError(f'type still None after type-checking. Expression: {e}')
         case ArrayInitDyn(lenExp, elemInit):
             (atomLen, tmps1) = transExpAtomic(lenExp, ctx)
             (atomElem, tmps2) = transExpAtomic(elemInit, ctx)
@@ -156,7 +184,7 @@ def transStmt(s: stmt, ctx: Ctx) -> list[atom.stmt]:
                 (a, tmps) = transExp(e, False, ctx)
                 return mkAssigns(tmps) + [atom.Return(a)]
             else:
-                return [atom.Return()]
+                return [atom.Return(None)]
 
 def transStmts(stmts: list[stmt], ctx: Ctx) -> tuple[list[atom.stmt], Ctx]:
     """

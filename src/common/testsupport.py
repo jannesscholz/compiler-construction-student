@@ -93,10 +93,6 @@ def runFileTest(srcFile: str,
         assert result.exitcode == 0
         expectedOutput = getGolden(srcFile, input)
         realOutput = result.stdout.rstrip()
-        if expectedOutput != realOutput:
-            print("--")
-            print(input)
-            print("--")
         assert expectedOutput == realOutput
     else:
         errKind, errDetails = err
